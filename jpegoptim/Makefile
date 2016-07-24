@@ -1,8 +1,8 @@
+build: all
 
-jpegoptim.c:
-	curl http://www.kokkonen.net/tjko/src/jpegoptim-1.2.4.tar.gz | tar xz --strip-components=1 --exclude=Makefile
+all:  src/jpegoptim.h
 
-clean:
+src/jpegoptim.h: ../.gitmodules
+	../scripts/fetch-submodule src && touch src/jpegoptim.h
 
-install:
-
+.PHONY: build all install clean

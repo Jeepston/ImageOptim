@@ -1,6 +1,7 @@
 /* tooltip */
 "%@ failed to start" = "O %@ falhou ao iniciar";
 
+/* tooltip */
 "All neccessary tools have been disabled in Preferences" = "Todas as ferramentas necessárias foram desactivadas nas Preferências";
 
 /* tooltip, generic loading error */
@@ -31,8 +32,6 @@
 "Started %@" = "Iniciado o %@";
 
 /* tooltip */
-"Waiting to be optimized" = "A aguardar para ser optimizado";
-
 /* tooltip */
-"Waiting to start more optimizations" = "A aguardar para iniciar mais optimizações";
+"Waiting to be optimized" = "A aguardar para iniciar mais optimizações";
 

@@ -13,8 +13,6 @@
 /* undo command name */
 "Cut" = "Cortar";
 
-"KB" = "KO";
-
 /* tooltip */
 "File cannot be optimized any further" = "El archivo no se puede optimizar más";
 
@@ -23,6 +21,9 @@
 
 /* tooltip */
 "Inspecting file" = "Inspeccionando archivo";
+
+/* kilobytes suffix */
+"KB" = "KO";
 
 /* newly added to the queue */
 "New file" = "Nuevo archivo";
@@ -43,8 +44,6 @@
 "Started %@" = "Iniciado %@";
 
 /* tooltip */
-"Waiting to be optimized" = "Esperando para ser optimizado";
-
 /* tooltip */
-"Waiting to start more optimizations" = "A la espera de iniciar más optimizaciones";
+"Waiting to be optimized" = "A la espera de iniciar más optimizaciones";
 

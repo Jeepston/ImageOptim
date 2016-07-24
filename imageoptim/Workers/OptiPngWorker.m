@@ -9,28 +9,22 @@
 
 @implementation OptiPngWorker
 
--(instancetype)init {
-    if (self = [super init]) {
-        NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-        optlevel = [defs integerForKey:@"OptiPngLevel"];
-        interlace = [defs integerForKey:@"OptiPngInterlace"];
-
+-(instancetype)initWithLevel:(NSInteger)level file:(File *)aFile {
+    if (self = [super initWithFile:file]) {
+        optlevel = MAX(3, MIN(level+1, 7));
     }
     return self;
 }
 
 
 -(NSInteger)settingsIdentifier {
-    return optlevel*2 + interlace;
+    return optlevel*2;
 }
 
 -(BOOL)runWithTempPath:(NSURL *)temp {
     NSMutableArray *args = [NSMutableArray arrayWithObjects: [NSString stringWithFormat:@"-o%d",(int)(optlevel ? optlevel : 6)],
+                            @"-i0",
                             @"-out",temp.path,@"--",file.filePathOptimized.path,nil];
-
-    if (interlace != -1) {
-        [args insertObject:[NSString stringWithFormat:@"-i%d",(int)interlace] atIndex:0];
-    }
 
     if (![self taskForKey:@"OptiPng" bundleName:@"optipng" arguments:args]) {
         return NO;
@@ -46,10 +40,10 @@
 
     [self parseLinesFromHandle:commandHandle];
 
-    [task waitUntilExit];
+    BOOL ok = [self waitUntilTaskExit];
     [commandHandle closeFile];
 
-    if ([task terminationStatus]) return NO;
+    if (!ok) return NO;
 
     if (fileSizeOptimized) {
         return [file setFilePathOptimized:temp size:fileSizeOptimized toolName:@"OptiPNG"];

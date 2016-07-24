@@ -15,4 +15,6 @@
 	NSUInteger fileSize;	
 	NSUInteger fileSizeOptimized;	
 }
+
+-(instancetype)initWithLevel:(NSInteger)level file:(File *)aFile;
 @end

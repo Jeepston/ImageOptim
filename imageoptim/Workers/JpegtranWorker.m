@@ -10,15 +10,12 @@
 @implementation JpegtranWorker
 
 -(NSInteger)settingsIdentifier {
-    return @(jpegrescan*2+strip);
+    return strip;
 }
 
--(instancetype)initWithFile:(File *)aFile {
+-(instancetype)initWithDefaults:(NSUserDefaults *)defaults file:(File *)aFile {
     if (self = [super initWithFile:aFile]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
         strip = [defaults boolForKey:@"JpegTranStripAll"];
-
-        jpegrescan = [defaults boolForKey:@"JpegRescanEnabled"];
     }
     return self;
 }
@@ -26,32 +23,23 @@
 -(BOOL)runWithTempPath:(NSURL *)temp {
     // eh, handling of paths starting with "-" is unsafe here. Hopefully all paths from dropped files will be absolute...
     NSMutableArray *args = [NSMutableArray arrayWithObject:file.filePathOptimized.path];
-    NSString *executableName, *prefName;
 
-    if (jpegrescan) {
-        executableName = @"jpegrescan";
-        prefName = @"JpegRescan";
-        if (strip) {
-            [args insertObject:@"-s" atIndex:0];
-        }
-        [args addObject:temp.path];
-    } else {
-        executableName = @"jpegtran";
-        prefName = @"JpegTran";
-        [args insertObject:@"-outfile" atIndex:0];
-        [args insertObject:temp.path atIndex:1];
+    [args insertObject:@"-outfile" atIndex:0];
+    [args insertObject:temp.path atIndex:1];
 
-        [args insertObject:@"-optimize" atIndex:0];
-        [args insertObject:@"-copy" atIndex:0];
-        [args insertObject:strip ? @"none" : @"all" atIndex:1];
-    }
+    [args insertObject:@"-optimize" atIndex:0];
+    [args insertObject:@"-copy" atIndex:0];
+    [args insertObject:strip ? @"none" : @"all" atIndex:1];
 
-    // For jpegrescan to work both JpegTran and JpegRescan need to be enabled
-    if (![self taskForKey:prefName bundleName:executableName arguments:args]) {
+    if (![self taskForKey:@"JpegTran" bundleName:@"jpegtran" arguments:args]) {
         return NO;
     }
 
-    [task setCurrentDirectoryPath:[[[NSBundle mainBundle] pathForAuxiliaryExecutable:@"jpegtran"] stringByDeletingLastPathComponent]];
+    NSString *jpegtranPath = [self pathForExecutableName:@"jpegtran"];
+    if (!jpegtranPath) {
+        return NO;
+    }
+    [task setCurrentDirectoryPath:[jpegtranPath stringByDeletingLastPathComponent]];
 
     NSPipe *commandPipe = [NSPipe pipe];
     NSFileHandle *commandHandle = [commandPipe fileHandleForReading];
@@ -62,15 +50,15 @@
     [self launchTask];
 
     [commandHandle readToEndOfFileInBackgroundAndNotify];
-    [task waitUntilExit];
+    BOOL ok = [self waitUntilTaskExit];
 
     [commandHandle closeFile];
 
-    if ([task terminationStatus]) return NO;
+    if (!ok) return NO;
 
     NSUInteger fileSizeOptimized = [File fileByteSize:temp];
     if (fileSizeOptimized) {
-        return [file setFilePathOptimized:temp size:fileSizeOptimized toolName:executableName];
+        return [file setFilePathOptimized:temp size:fileSizeOptimized toolName:@"MozJPEG"];
     }
     return NO;
 }

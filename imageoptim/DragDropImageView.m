@@ -6,28 +6,21 @@
 
 #import "DragDropImageView.h"
 #import "ImageOptimController.h"
-#import "FilesQueue.h"
+#import "FilesController.h"
 
 
 @implementation DragDropImageView
 
 - (void)awakeFromNib {
     [self registerForDraggedTypes:@[NSFilenamesPboardType]];
-    [self setAlphaValue:1.0];
 }
 
--(void)setHidden:(BOOL)flag {
-    if (!flag) [super setHidden:NO];
-    [self.animator setAlphaValue:flag?0:1];
+- (BOOL)allowsVibrancy {
+    return NSAppKitVersionNumber >= NSAppKitVersionNumber10_10;
 }
 
--(BOOL)isHidden {
-    return [super isHidden] || self.alphaValue < 1.0f;
-}
-
--(NSView *)hitTest:(NSPoint)aPoint {
-    if ([self isHidden]) return nil; // just to make sure that hacked hidden property doesn't screw it up
-    return [super hitTest:aPoint];
+-(BOOL)isOpaque {
+    return NSAppKitVersionNumber < NSAppKitVersionNumber10_10;;
 }
 
 //Destination Operations
@@ -52,8 +45,12 @@
 }
 
 -(void)drawRect:(NSRect)rect {
-    [[NSColor windowBackgroundColor] setFill];
-    NSRectFill(rect);
+    if (NSAppKitVersionNumber < NSAppKitVersionNumber10_10) {
+        [[NSColor windowBackgroundColor] setFill];
+    } else {
+        [[NSColor clearColor] set];
+    }
+    NSRectFillUsingOperation(rect, NSCompositeSourceOver);
 
     NSColor *gray = [NSColor colorWithDeviceWhite:0 alpha:highlight ? 1.0/4.0 : 1.0/8.0];
     [gray set];
@@ -98,7 +95,7 @@
 - (BOOL)performDragOperation:(id <NSDraggingInfo>)sender {
     if ([sender draggingSource]!=self) {
         NSArray *files = [[sender draggingPasteboard] propertyListForType:NSFilenamesPboardType];
-        [filesQueue performSelectorInBackground:@selector(addPaths:) withObject:files];
+        [filesController performSelectorInBackground:@selector(addPaths:) withObject:files];
     }
     return YES;
 }

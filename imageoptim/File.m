@@ -6,7 +6,9 @@
 
 #import "File.h"
 #import "ImageOptimController.h"
+#import "Workers/Save.h"
 #import "Workers/AdvCompWorker.h"
+#import "Workers/PngquantWorker.h"
 #import "Workers/PngoutWorker.h"
 #import "Workers/OptiPngWorker.h"
 #import "Workers/PngCrushWorker.h"
@@ -38,11 +40,18 @@
 }
 @end
 
-@implementation File
+@interface File ()
+@property (assign) BOOL isDone;
+@property (assign) BOOL isFailed;
+@end
 
-@synthesize workersPreviousResults, byteSizeOriginal, byteSizeOptimized, filePath, displayName, statusText, statusOrder, statusImage, percentDone, bestToolName;
+@implementation File {
+    BOOL preservePermissions;
+}
 
--(instancetype)initWithFilePath:(NSURL *)aPath resultsDatabase:(ResultsDb*)aDb
+@synthesize workersPreviousResults, byteSizeOriginal, byteSizeOptimized, filePath, displayName, statusText, statusOrder, statusImageName, percentDone, bestToolName, isFailed=failed, isDone=done;
+
+-(instancetype)initWithFilePath:(nonnull NSURL *)aPath resultsDatabase:(nullable ResultsDb *)aDb
 {
     if (self = [self init]) {
         workersPreviousResults = [NSMutableDictionary new];
@@ -70,7 +79,7 @@
     return byteSizeOriginal < 10*1024;
 }
 
--(NSString *)fileName {
+-(nonnull NSString *)fileName {
     if (displayName) return displayName;
     return [filePath lastPathComponent];
 }
@@ -86,13 +95,14 @@
     }
 }
 
-- (id)copyWithZone:(NSZone *)zone {
+- (nonnull id)copyWithZone:(nullable NSZone *)zone {
     return [[File allocWithZone:zone] initWithFilePath:filePath resultsDatabase:db];
 }
 
 -(void)resetToOriginalByteSize:(NSUInteger)size {
     [bestTools removeAllObjects];
     self.bestToolName = nil;
+    lossyConverted = NO;
     byteSizeOptimized = 0;
     byteSizeOriginal = size;
     byteSizeOnDisk = size;
@@ -110,10 +120,6 @@
     return byteSizeOptimized < byteSizeOriginal && (optimized || byteSizeOptimized < byteSizeOnDisk);
 }
 
--(BOOL)isDone {
-    return done;
-}
-
 -(void)setByteSizeOptimized:(NSUInteger)size {
     @synchronized(self) {
         if ((!byteSizeOptimized || size < byteSizeOptimized) && size > 30) {
@@ -124,14 +130,16 @@
     }
 }
 
--(void)removeOldFilePathOptimized {
-    NSURL *path = filePathOptimized;
-    if (path) {
-        filePathOptimized = nil;
-        if (![filePathsOptimizedInUse containsObject:path]) {
-            [[NSFileManager defaultManager] removeItemAtURL:path error:nil];
+-(void)removeOldFilePathOptimized:(NSURL *)path {
+    if (!path) {
+        return;
+    }
+    @synchronized(self) {
+        if ([filePathsOptimizedInUse containsObject:path]) {
+            return;
         }
     }
+    [[NSFileManager defaultManager] removeItemAtURL:path error:nil];
 }
 
 -(void)updateBestToolName:(ToolStats*)newTool {
@@ -157,27 +165,30 @@
 
 -(BOOL)setFilePathOptimized:(NSURL *)tempPath size:(NSUInteger)size toolName:(NSString *)toolname {
     IODebug("File %@ optimized with %@ from %u to %u in %@",[filePath?filePath:filePathOptimized path],toolname,(unsigned int)byteSizeOptimized,(unsigned int)size,tempPath);
+    NSURL *oldPath = nil;
+    BOOL changed = NO;
     @synchronized(self) {
         if (size && size < byteSizeOptimized) {
             assert(![filePathOptimized.path isEqualToString:tempPath.path]);
-            [self removeOldFilePathOptimized];
+            oldPath = filePathOptimized;
             filePathOptimized = tempPath;
             NSUInteger oldSize = byteSizeOptimized;
             [self setByteSizeOptimized:size];
-
             [self performSelectorOnMainThread:@selector(updateBestToolName:) withObject:[[ToolStats alloc] initWithName:toolname oldSize:oldSize newSize:size] waitUntilDone:NO];
-            return YES;
+            changed = YES;
         }
     }
-    return NO;
+    [self removeOldFilePathOptimized:oldPath];
+    return changed;
 }
 
 -(BOOL)removeExtendedAttrAtURL:(NSURL *)path
 {
     NSDictionary *extAttrToRemove = @{ @"com.apple.FinderInfo"  : @1,
                                        @"com.apple.ResourceFork": @1,
-                                       @"com.apple.quarantine"  : @1
-                                      };
+                                       @"com.apple.quarantine"  : @1,
+                                       @"com.apple.metadata:kMDItemWhereFroms": @1,
+                                    };
 
     const char *fileSystemPath = [path.path fileSystemRepresentation];
 
@@ -205,9 +216,9 @@
         NSString *name = @(utf8name);
         if (extAttrToRemove[name]) {
             if (removexattr(fileSystemPath, utf8name, 0) == 0) {
-                IODebug("Removed %s from %s", utf8name, fileSystemPath);
+                IODebug("Removed %s from %@", utf8name, path.path);
             } else {
-                IOWarn("Can't remove %s from %s", utf8name, fileSystemPath);
+                IOWarn("Can't remove %s from %@", utf8name, path.path);
                 return NO;
             }
         }
@@ -239,7 +250,7 @@
 }
 
 -(BOOL)canRevert {
-    return revertPath && done;
+    return revertPath && self.isDone && !stopping;
 }
 
 -(BOOL)revert {
@@ -273,8 +284,7 @@
 -(BOOL)saveResult {
     assert(filePathOptimized);
     @try {
-        NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-        BOOL preserve = [defs boolForKey:@"PreservePermissions"];
+
         NSFileManager *fm = [NSFileManager defaultManager];
 
         NSError *error = nil;
@@ -286,7 +296,7 @@
             return NO;
         }
 
-        if (preserve) {
+        if (preservePermissions) {
             NSString *writeToFilename = [[NSString stringWithFormat:@".%@~imageoptim", [filePath.lastPathComponent stringByDeletingPathExtension]] stringByAppendingPathExtension:filePath.pathExtension];
             NSURL *writeToURL = [enclosingDir URLByAppendingPathComponent:writeToFilename];
             NSString *writeToPath = writeToURL.path;
@@ -379,29 +389,35 @@
     return YES;
 }
 
+-(void)setNooptStatus {
+    [self setStatus:@"noopt" order:5 text:NSLocalizedString(@"File cannot be optimized any further",@"tooltip")];
+}
+
 -(void)saveResultAndUpdateStatus {
     assert([self isBusy]);
-    done = YES;
+    self.isDone = YES;
     if ([self isOptimized] && filePathOptimized && byteSizeOriginal && byteSizeOptimized) {
         BOOL saved = [self saveResult];
         if (saved) {
             optimized = YES;
             [self setStatus:@"ok" order:7 text:[NSString stringWithFormat:NSLocalizedString(@"Optimized successfully with %@",@"tooltip"),bestToolName]];
         } else {
-            [self setStatus:@"err" order:9 text:NSLocalizedString(@"Optimized file could not be saved",@"tooltip")];
+            [self setError:NSLocalizedString(@"Optimized file could not be saved",@"tooltip")];
         }
     } else {
-        [self setStatus:@"noopt" order:5 text:NSLocalizedString(@"File cannot be optimized any further",@"tooltip")];
-        [db setUnoptimizableFileHash:inputFileHash size:byteSizeOnDisk];
+        [self setNooptStatus];
+        if (!stopping && !self.isFailed) {
+            [db setUnoptimizableFileHash:inputFileHash size:byteSizeOnDisk];
+        }
     }
     [self cleanup];
 }
 
--(NSString*)mimeType {
+-(nullable NSString *)mimeType {
     return fileType == FILETYPE_PNG ? @"image/png" : (fileType == FILETYPE_JPEG ? @"image/jpeg" : (fileType == FILETYPE_GIF ? @"image/gif" : nil));
 }
 
--(int)fileType:(NSData *)data {
+-(int)fileType:(nonnull NSData *)data {
     const unsigned char pngheader[] = {0x89,0x50,0x4e,0x47,0x0d,0x0a};
     const unsigned char jpegheader[] = {0xff,0xd8,0xff};
     const unsigned char gifheader[] = {0x47,0x49,0x46,0x38};
@@ -419,28 +435,38 @@
     return 0;
 }
 
--(void)enqueueWorkersInCPUQueue:(NSOperationQueue *)queue fileIOQueue:(NSOperationQueue *)aFileIOQueue {
+-(void)enqueueWorkersInCPUQueue:(nonnull NSOperationQueue *)queue fileIOQueue:(nonnull NSOperationQueue *)aFileIOQueue defaults:(nonnull NSUserDefaults*)defaults {
 
+    [self willChangeValueForKey:@"isBusy"];
+    NSOperation *actualEnqueue = [NSBlockOperation blockOperationWithBlock:^{
+        @synchronized(self) {
+            [self doEnqueueWorkersInCPUQueue:queue defaults:defaults];
+        }
+    }];
     @synchronized(self) {
-        done = NO;
+        self.isDone = NO;
+        self.isFailed = NO;
+        stopping = NO;
         optimized = NO;
         fileIOQueue = aFileIOQueue; // will be used for saving
         workers = [[NSMutableArray alloc] initWithCapacity:10];
+        preservePermissions = [defaults boolForKey:@"PreservePermissions"];
 
-        NSOperation *actualEnqueue = [[NSInvocationOperation alloc] initWithTarget:self selector:@selector(doEnqueueWorkersInCPUQueue:) object:queue];
-        if (queue.operationCount < queue.maxConcurrentOperationCount) {
+        BOOL isQueueUnderUtilized = queue.operationCount < queue.maxConcurrentOperationCount;
+        if (isQueueUnderUtilized) {
             actualEnqueue.queuePriority = NSOperationQueuePriorityVeryHigh;
         }
 
         [workers addObject:actualEnqueue];
         [fileIOQueue addOperation:actualEnqueue];
     }
+    [self didChangeValueForKey:@"isBusy"];
 }
 
 -(void)setSettingsHash:(NSArray*)allWorkers {
     CC_MD5_CTX md5ctx = {};
     CC_MD5_Init(&md5ctx);
-    CC_MD5_Update(&md5ctx, "1", 1); // to update when programs change
+    CC_MD5_Update(&md5ctx, "3", 1); // to update when programs change
     for (Worker *w in allWorkers) {
         NSInteger tmp = [w settingsIdentifier];
         CC_MD5_Update(&md5ctx, &tmp, sizeof(tmp));
@@ -448,7 +474,7 @@
     CC_MD5_Final((unsigned char *)settingsHash, &md5ctx);
 }
 
--(void)doEnqueueWorkersInCPUQueue:(NSOperationQueue *)queue {
+-(void)doEnqueueWorkersInCPUQueue:(nonnull NSOperationQueue *)queue defaults:(nonnull NSUserDefaults*)defs {
     [self setStatus:@"progress" order:3 text:NSLocalizedString(@"Inspecting file",@"tooltip")];
 
     NSError *err = nil;
@@ -456,7 +482,7 @@
     NSUInteger length = [fileData length];
     if (!fileData || !length) {
         IOWarn(@"Can't open the file %@ %@", filePath.path, err);
-        [self setStatus:@"err" order:8 text:NSLocalizedString(@"Can't open the file",@"tooltip, generic loading error")];
+        [self setError:NSLocalizedString(@"Can't open the file",@"tooltip, generic loading error")];
         return;
     }
 
@@ -473,74 +499,96 @@
 
     NSFileManager *fm = [NSFileManager defaultManager];
     if (![fm isWritableFileAtPath:filePath.path]) {
-        [self setStatus:@"err" order:9 text:NSLocalizedString(@"Optimized file could not be saved",@"tooltip")];
+        [self setError:NSLocalizedString(@"Optimized file could not be saved",@"tooltip")];
         return;
     }
 
     NSMutableArray *runFirst = [NSMutableArray new];
     NSMutableArray *runLater = [NSMutableArray new];
 
-    NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-
-    NSArray *worker_list = nil;
+    NSMutableArray *worker_list = [NSMutableArray new];
+    NSInteger level = [defs integerForKey:@"AdvPngLevel"]; // AdvPNG setting is reused for all tools now
+    BOOL lossyEnabled = [defs boolForKey:@"LossyEnabled"];
+    if (lossyEnabled) {
+        [defs setBool:YES forKey:@"LossyUsed"];
+    }
 
     if (fileType == FILETYPE_PNG) {
-        worker_list = @[
-                          @ {@"key":@"PngCrushEnabled", @"class":[PngCrushWorker class]},
-                          @ {@"key":@"OptiPngEnabled", @"class":[OptiPngWorker class]},
-        @ {@"key":@"ZopfliEnabled", @"class":[ZopfliWorker class], @"block": ^(Worker *w) {
-            ((ZopfliWorker *)w).alternativeStrategy = hasBeenRunBefore;
+        if (hasBeenRunBefore) {
+            level++;
         }
-                            },
-        @ {@"key":@"PngOutEnabled", @"class":[PngoutWorker class]},
-        @ {@"key":@"AdvPngEnabled", @"class":[AdvCompWorker class]},
-                      ];
+
+        if (lossyEnabled) {
+            NSInteger pngQuality = [defs integerForKey:@"PngMinQuality"];
+            if (!lossyConverted && pngQuality < 100 && pngQuality > 30) {
+                Worker *w = [[PngquantWorker alloc] initWithLevel:level minQuality:pngQuality file:self];
+                [runFirst addObject:w];
+                lossyConverted = YES;
+            }
+        }
+        
+        BOOL pngcrushEnabled = [defs boolForKey:@"PngCrushEnabled"];
+        BOOL optipngEnabled = [defs boolForKey:@"OptiPngEnabled"];
+        BOOL pngoutEnabled = [defs boolForKey:@"PngOutEnabled"];
+        BOOL zopfliEnabled = [defs boolForKey:@"ZopfliEnabled"];
+        BOOL advpngEnabled = [defs boolForKey:@"AdvPngEnabled"];
+        
+        if (level < 4 && zopfliEnabled) {
+            pngoutEnabled = NO;
+        }
+        
+        if (level < 2 && optipngEnabled) {
+            pngcrushEnabled = NO;
+        }
+        
+        if (pngcrushEnabled) [worker_list addObject:[[PngCrushWorker alloc] initWithLevel:level defaults:defs file:self]];
+        if (optipngEnabled) [worker_list addObject:[[OptiPngWorker alloc] initWithLevel:level file:self]];
+        if (pngoutEnabled) [worker_list addObject:[[PngoutWorker alloc] initWithLevel:level defaults:defs file:self]];
+        if (advpngEnabled) [worker_list addObject:[[AdvCompWorker alloc] initWithLevel:level file:self]];
+        if (zopfliEnabled) {
+            ZopfliWorker *zw = [[ZopfliWorker alloc]initWithLevel:level defaults:defs file:self];
+            zw.alternativeStrategy = hasBeenRunBefore;
+            [worker_list addObject:zw];
+        }
     } else if (fileType == FILETYPE_JPEG) {
-        worker_list = @[
-                          @ {@"key":@"JpegOptimEnabled", @"class":[JpegoptimWorker class]},
-                          @ {@"key":@"JpegTranEnabled", @"class":[JpegtranWorker class]},
-                      ];
+        if ([defs boolForKey:@"JpegOptimEnabled"]) [worker_list addObject:[[JpegoptimWorker alloc] initWithDefaults:defs file:self]];
+        if ([defs boolForKey:@"JpegTranEnabled"]) [worker_list addObject:[[JpegtranWorker alloc] initWithDefaults:defs file:self]];
     } else if (fileType == FILETYPE_GIF) {
         if ([defs boolForKey:@"GifsicleEnabled"]) {
-            GifsicleWorker *w = [[GifsicleWorker alloc] initWithFile:self];
-            w.interlace = NO;
-            [runLater addObject:w];
-
-            w = [[GifsicleWorker alloc] initWithFile:self];
-            w.interlace = YES;
-            [runLater addObject:w];
+            NSInteger gifQuality = [defs integerForKey:@"GifQuality"];
+            if (lossyEnabled && !lossyConverted && gifQuality < 100 && gifQuality > 30) {
+                Worker *w = [[GifsicleWorker alloc] initWithInterlace:NO quality:gifQuality file:self];
+                [runFirst addObject:w];
+                lossyConverted = YES;
+            } else {
+                [worker_list addObject:[[GifsicleWorker alloc] initWithInterlace:NO quality:100 file:self]];
+                if (level > 1) {
+                    [worker_list addObject:[[GifsicleWorker alloc] initWithInterlace:YES quality:100 file:self]];
+                }
+            }
         }
     } else {
-        [self setStatus:@"err" order:8 text:NSLocalizedString(@"File is neither PNG, GIF nor JPEG",@"tooltip")];
+        [self setError:NSLocalizedString(@"File is neither PNG, GIF nor JPEG",@"tooltip")];
         [self cleanup];
         return;
     }
 
-    BOOL isQueueUnderUtilized = [queue operationCount] <= [queue maxConcurrentOperationCount];
+    BOOL isQueueUnderUtilized = queue.operationCount < queue.maxConcurrentOperationCount;
 
-    for (NSDictionary *wl in worker_list) {
-        if ([defs boolForKey:wl[@"key"]]) {
+    for (Worker *w in worker_list) {
 
-            Worker *w = [wl[@"class"] alloc];
-            w = [w initWithFile:self];
-            if (wl[@"block"]) {
-                void (^block)(Worker *) = wl[@"block"];
-                block(w);
-            }
-
-            // generally optimizers that have side effects should always be run first, one at a time
-            // unfortunately that makes whole process single-core serial when there are very few files
-            // so for small queues rely on nextOperation to give some order when possible
-            if ([w makesNonOptimizingModifications]) {
-                if (!isQueueUnderUtilized || [self isSmall]) {
-                    [runFirst addObject:w];
-                } else {
-                    [w setQueuePriority:[runLater count] ? NSOperationQueuePriorityHigh : NSOperationQueuePriorityVeryHigh];
-                    [runLater addObject:w];
-                }
+        // generally optimizers that have side effects should always be run first, one at a time
+        // unfortunately that makes whole process single-core serial when there are very few files
+        // so for small queues rely on nextOperation to give some order when possible
+        if ([w makesNonOptimizingModifications]) {
+            if (!isQueueUnderUtilized || [self isSmall]) {
+                [runFirst addObject:w];
             } else {
+                [w setQueuePriority:[runLater count] ? NSOperationQueuePriorityHigh : NSOperationQueuePriorityVeryHigh];
                 [runLater addObject:w];
             }
+        } else {
+            [runLater addObject:w];
         }
     }
 
@@ -555,14 +603,14 @@
     CC_MD5_Update(md5ctxp, [fileData bytes], (CC_LONG)[fileData length]);
     CC_MD5_Final((unsigned char*)inputFileHash, md5ctxp);
     if ([db getResultWithHash:inputFileHash]) { // FIXME: check for lossy
-        done = YES;
+        self.isDone = YES;
         NSLog(@"Skipping %@, because it has been optimized before", filePath.path);
-        [self setStatus:@"noopt" order:5 text:NSLocalizedString(@"File cannot be optimized any further",@"tooltip")];
+        [self setNooptStatus];
         [self cleanup];
         return;
     }
 
-    NSOperation *saveOp = [[NSInvocationOperation alloc] initWithTarget:self selector:@selector(saveResultAndUpdateStatus) object:nil];
+    NSOperation *saveOp = [[Save alloc] initWithTarget:self selector:@selector(saveResultAndUpdateStatus) object:nil];
 
     Worker *previousWorker = nil;
     for (Worker *w in runFirst) {
@@ -596,8 +644,8 @@
     [workers addObjectsFromArray:runLater];
 
     if (![workers count]) {
-        done = YES;
-        [self setStatus:@"err" order:8 text:NSLocalizedString(@"All neccessary tools have been disabled in Preferences",@"tooltip")];
+        self.isDone = YES;
+        [self setError:NSLocalizedString(@"All neccessary tools have been disabled in Preferences",@"tooltip")];
         [self cleanup];
     } else {
         [self updateStatusOfWorker:nil running:NO];
@@ -607,15 +655,22 @@
 }
 
 -(void)cleanup {
+    NSURL *oldPath;
+    NSMutableSet *paths;
     @synchronized(self) {
+        stopping = NO;
         [workers makeObjectsPerformSelector:@selector(cancel)];
         [workers removeAllObjects];
-        [self removeOldFilePathOptimized];
-        NSFileManager *fm = [NSFileManager defaultManager];
-        for(NSString *path in filePathsOptimizedInUse) {
-            [fm removeItemAtPath:path error:nil];
-        }
-        [filePathsOptimizedInUse removeAllObjects];
+        oldPath = filePathOptimized;
+        filePathOptimized = nil;
+        paths = filePathsOptimizedInUse;
+        filePathsOptimizedInUse = [NSMutableSet new];
+    }
+
+    [self removeOldFilePathOptimized:oldPath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for(NSString *path in paths) {
+        [fm removeItemAtPath:path error:nil];
     }
 }
 
@@ -627,7 +682,28 @@
     return isit;
 }
 
--(void)updateStatusOfWorker:(Worker *)currentWorker running:(BOOL)started {
+-(BOOL)stop {
+    if (![self isStoppable]) {
+        return NO;
+    }
+    @synchronized(self) {
+        if (!self.isDone) {
+            stopping = YES;
+            for(Worker *w in workers) {
+                if (![w isKindOfClass:[Save class]]) {
+                    [w cancel];
+                }
+            }
+        }
+    }
+    return YES;
+}
+
+-(BOOL)isStoppable {
+    return stopping || (!self.isDone && [self isBusy]);
+}
+
+-(void)updateStatusOfWorker:(nullable Worker *)currentWorker running:(BOOL)started {
     NSOperation *running = nil;
 
     @synchronized(self) {
@@ -654,11 +730,22 @@
     }
 }
 
--(void)setStatus:(NSString *)imageName order:(NSInteger)order text:(NSString *)text {
+-(void)setError:(nonnull NSString *)text {
+    self.isFailed = YES;
+    [self setStatus:@"err" order:9 text:text];
+}
+
+-(void)setStatus:(nonnull NSString *)imageName order:(NSInteger)order text:(nonnull NSString *)text {
     void (^setter)() = ^(void){
+
+        // Keep failed status visible instead of replacing with progress/noopt/etc
+        if (self.isFailed && ![imageName isEqualToString:@"ok"] && ![imageName isEqualToString:@"err"]) {
+            return;
+        }
+
         statusOrder = order;
         self.statusText = text;
-        self.statusImage = [NSImage imageNamed:imageName];
+        self.statusImageName = imageName;
     };
     if (order) {
         dispatch_async(dispatch_get_main_queue(), setter);
@@ -667,7 +754,7 @@
     }
 }
 
--(NSString *)description {
+-(nonnull NSString *)description {
     return [NSString stringWithFormat:@"%@ %ld/%ld (workers %ld)", self.filePath,(long)self.byteSizeOriginal,(long)self.byteSizeOptimized, [workers count]];
 }
 

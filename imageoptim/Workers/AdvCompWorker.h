@@ -13,4 +13,5 @@
 	NSInteger fileSizeOptimized;	
 }
 
+- (instancetype)initWithLevel:(NSInteger)opt file:(File *)aFile;
 @end

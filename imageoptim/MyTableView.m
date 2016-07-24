@@ -1,5 +1,5 @@
 #import "MyTableView.h"
-#import "FilesQueue.h"
+#import "FilesController.h"
 #import "RevealButtonCell.h"
 #import "File.h"
 #import "log.h"
@@ -7,26 +7,26 @@
 @implementation MyTableView
 
 -(void)removeObjects:(NSArray *)objects {
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
 
     [[self undoManager] registerUndoWithTarget:self selector:@selector(addObjects:) object:objects];
     [f removeObjects:objects];
 }
 
 -(void)addObjects:(NSArray *)objects {
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
 
     [[self undoManager] registerUndoWithTarget:self selector:@selector(removeObjects:) object:objects];
     [f addObjects:objects];
 }
 
 - (IBAction)delete:(id)sender {
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
     [self removeObjects:[f selectedObjects]];
 }
 
 - (IBAction)copy:(id)sender {
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
 
     NSArray *selected = [f selectedObjects];
     NSMutableArray *filePaths = [NSMutableArray arrayWithCapacity:[selected count]];
@@ -46,7 +46,7 @@
 }
 
 -(NSArray*)filesForDataURI {
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
 
     NSArray *selectedFiles = [f selectedObjects];
     NSMutableArray *files = [NSMutableArray arrayWithCapacity:[selectedFiles count]];
@@ -98,7 +98,7 @@
         [urls addObject:[NSURL fileURLWithPath:path]];
     }
 
-    FilesQueue *f = (FilesQueue*)[self delegate];
+    FilesController *f = (FilesController*)[self delegate];
     [f addURLsBelowSelection:urls];
 }
 
@@ -151,8 +151,11 @@
     // Find the visible cells that have a non-empty tracking rect and add rects for each of them
     NSRange visibleRows = [self rowsInRect:[self visibleRect]];
     NSIndexSet *visibleColIndexes = [self columnIndexesInRect:[self visibleRect]];
-
-    NSPoint mouseLocation = [self convertPoint:[[self window] convertScreenToBase:[NSEvent mouseLocation]] fromView:nil];
+    
+    CGRect rect = [self.window convertRectFromScreen:(CGRect){
+                       .origin = [NSEvent mouseLocation],
+                   }];
+    NSPoint mouseLocation = [self convertPoint:rect.origin fromView:nil];
 
     for (NSInteger row = visibleRows.location; row < visibleRows.location + visibleRows.length; row++) {
         // If it is a "full width" cell, we don't have to go through the rows
@@ -228,8 +231,7 @@
 - (NSDragOperation)draggingSourceOperationMaskForLocal:(BOOL)isLocal {
     if (isLocal) return NSDragOperationMove;
 
-    return NSDragOperationCopy;
-
+    return NSDragOperationCopy | NSDragOperationGeneric;
 }
 
 -(void) quickLook {
@@ -245,8 +247,8 @@
 }
 
 -(NSArray *)clickedRowSelection {
-    FilesQueue *fc = (FilesQueue *)[self delegate];
-    assert([fc isKindOfClass:[FilesQueue class]]);
+    FilesController *fc = (FilesController *)[self delegate];
+    assert([fc isKindOfClass:[FilesController class]]);
 
     NSInteger row = [self clickedRow];
     if (row < 0) {

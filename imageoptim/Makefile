@@ -1,17 +1,19 @@
-SPARKLE=$(TARGET_BUILD_DIR)/Sparkle.framework
 HELPINDEXES=$(addsuffix Help.helpindex, $(wildcard *.lproj/Help/))
+SUBMODULES=../Sparkle/Sparkle
 
-all: $(SPARKLE) pngout helpindexes
+build: all
 
-$(SPARKLE):
-	./getsparkle.sh $(SPARKLE)
+all: $(SUBMODULES) pngout helpindexes
+
+$(SUBMODULES): ../.gitmodules
+	../scripts/fetch-submodule $(shell dirname $@) && touch $@
 
 pngout:
-	curl http://static.jonof.id.au/dl/kenutils/pngout-20130221-darwin.tar.gz | tar xz
-	mv pngout-20130221-darwin/pngout pngout
+	curl http://static.jonof.id.au/dl/kenutils/pngout-20150319-darwin.tar.gz | tar xz
+	mv pngout-20150319-darwin/pngout pngout
 
 clean:
-	-rm -rf $(SPARKLE) pngout /tmp/sparkle.zip /tmp/sparkle.tar.bz2
+	-rm -rf pngout
 
 install:
 
@@ -19,3 +21,5 @@ helpindexes:: $(HELPINDEXES)
 
 %/Help.helpindex: %/index.html %/prefs.html
 	./makehelp.sh $(patsubst %.lproj/Help/Help.helpindex,%,$@)
+
+.PHONY: build all install clean

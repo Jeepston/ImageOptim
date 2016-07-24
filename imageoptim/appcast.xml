@@ -2,25 +2,22 @@
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0">
 <channel>
 <title>ImageOptim</title>
-<link>https://imageoptim.com/appcast.xml</link>
+<link>https://imageoptim.com/appcast-test.xml</link>
 <description>ImageOptim updates</description>
 <language>en</language>
 <item>
-<title>Version 1.5.4</title>
+<title>Version 1.6.2a2</title>
 <description><![CDATA[
 <ul>
-    <li>Added <samp>Revert to Original</samp> option (restores unoptimized file)</li>
-    <li>Added cache of already-optimized files. In some cases ImageOptim will be able to quickly skip files it knows it can't optimize any further</li>
+    <li>Much faster version of Zopfli</li>
+    <li>Updated pngcrush, pngquant2, MozJPEG</li>
+    <li>Runs tools with lower priority (OS&nbsp;X&nbsp;10.10+ only)</li>
+    <li>Updated Chinese localization (by pluwen)</li>
 </ul>
 ]]></description>
-<pubDate>Sat, 12 Jul 2014 00:46:44 +0100</pubDate>
-<enclosure url="https://imageoptim.com/ImageOptim1.5.4.tar.bz2" sparkle:version="1.5.4.1" length="1511591" type="application/bzip2" sparkle:dsaSignature="MCwCFGn8CiKEr45QX0QCk7fWfGdw2CUZAhQ6nk6vYxHxUZ5wRyxPbfUny1vBxQ=="/>
-<sparkle:minimumSystemVersion>10.6.8</sparkle:minimumSystemVersion>
-
-
-
-
-
+<pubDate>Sun, 26 Jul 2015 14:37:57 +0000</pubDate>
+<enclosure url="https://imageoptim.com/ImageOptim1.6.1a1.tar.bz2" sparkle:version="1.6.1a1" length="1416711" type="application/bzip2" sparkle:dsaSignature="MCwCFHALRNGOFeh3785GRdm1gZq9ywjhAhQZFDtlhIwEUUf78EcVbliTJGueNQ=="/>
+<sparkle:minimumSystemVersion>10.11.0</sparkle:minimumSystemVersion>
 </item>
 </channel>
 </rss>

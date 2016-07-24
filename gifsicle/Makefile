@@ -1,10 +1,9 @@
+build: all
 
-src/gifsicle.c:
-	curl http://www.lcdf.org/gifsicle/gifsicle-1.68.tar.gz | tar xz --strip-components=1 --exclude=Makefile
-	patch -p1 < gifsicle-1.64-imageoptim.patch
+all: gifsicle/src
 
-clean:
-	test ./src/gifsicle.c && rm -rf ./src
+gifsicle/src: ../.gitmodules
+	../scripts/fetch-submodule gifsicle && touch gifsicle/src
+	patch -p1 -d gifsicle < gifsicle-1.89-imageoptim.patch
 
-install:
-
+.PHONY: build all install clean

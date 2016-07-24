@@ -8,8 +8,9 @@
 #import "CommandWorker.h"
 
 @interface GifsicleWorker : CommandWorker {
+    NSUInteger quality;
     BOOL interlace;
 }
 
-@property (nonatomic,assign) BOOL interlace;
+- (instancetype)initWithInterlace:(BOOL)yn quality:(NSUInteger)quality file:(File *)aFile;
 @end

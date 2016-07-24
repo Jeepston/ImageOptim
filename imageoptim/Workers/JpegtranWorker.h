@@ -8,7 +8,8 @@
 #import "CommandWorker.h"
 
 @interface JpegtranWorker : CommandWorker {
-    BOOL strip, jpegrescan;
+    BOOL strip;
 }
 
+- (instancetype)initWithDefaults:(NSUserDefaults *)defaults file:(File *)aFile;
 @end

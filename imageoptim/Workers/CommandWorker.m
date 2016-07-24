@@ -9,7 +9,8 @@
 #import "../File.h"
 #import "../log.h"
 
-@implementation CommandWorker
+@implementation CommandWorker {
+}
 
 -(BOOL)parseLine:(NSString *)line {
     /* stub */
@@ -45,6 +46,10 @@
 {
     task = [NSTask new];
 
+    if ([task respondsToSelector:@selector(setQualityOfService:)]) {
+        task.qualityOfService = NSQualityOfServiceUtility;
+    }
+
     IODebug("Launching %@ %@",path,[arguments componentsJoinedByString:@" "]);
 
     [task setLaunchPath: path];
@@ -67,6 +72,10 @@
             tempPath = nil;
         }
     }
+    @catch(NSException *e) {
+        IOWarn(@"%@ failed: %@: %@", [self className], [e name], e);
+        [file setError:[NSString stringWithFormat:@"Internal Error: %@ %@", [e name], [e reason]]];
+    }
     @finally {
         if (tempPath) {
             [[NSFileManager defaultManager] removeItemAtURL:tempPath error:nil];
@@ -76,6 +85,11 @@
 
 -(void)launchTask {
     @try {
+        BOOL supportsQoS = [task respondsToSelector:@selector(setQualityOfService:)];
+
+        if (supportsQoS) {
+            task.qualityOfService = self.qualityOfService;
+        }
         [task launch];
 
         int pid = [task processIdentifier];
@@ -84,6 +98,16 @@
     @catch (NSException *e) {
         IOWarn("Failed to launch %@ - %@",[self className],e);
     }
+}
+
+-(BOOL)waitUntilTaskExit {
+    [task waitUntilExit];
+    int status = [task terminationStatus];
+    if (status) {
+        NSLog(@"Task %@ failed with status %d", [self className], status);
+        return NO;
+    }
+    return YES;
 }
 
 -(long)readNumberAfter:(NSString *)str inLine:(NSString *)line {
@@ -110,41 +134,43 @@
     [super cancel];
 }
 
+
 -(BOOL)taskForKey:(NSString *)key bundleName:(NSString *)resourceName arguments:(NSArray *)args {
     NSString *executable = [self executablePathForKey:key bundleName:resourceName];
-
     if (!executable) {
-        IOWarn("Could not launch %@",resourceName);
-        [file setStatus:@"err" order:8 text:[NSString stringWithFormat:NSLocalizedString(@"%@ failed to start",@"tooltip"),key]];
+        IOWarn("Cannot launch %@",resourceName);
+        [file setError:[NSString stringWithFormat:NSLocalizedString(@"%@ failed to start",@"tooltip"),key]];
         return NO;
     }
-
     [self taskWithPath:executable arguments:args];
     return YES;
 }
 
--(NSString *)executablePathForKey:(NSString *)prefsName bundleName:(NSString *)resourceName {
-    NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
-    NSString *path = nil;
+-(NSString *)pathForExecutableName:(NSString *)resourceName {
+    NSBundle *bundle = [NSBundle bundleForClass:[self class]];
 
-    path = [[NSBundle mainBundle] pathForAuxiliaryExecutable:resourceName];
+    NSString *path = [bundle pathForAuxiliaryExecutable:resourceName];
     if (!path) {
-        path = [[NSBundle mainBundle] pathForResource:resourceName ofType:@""];
+        path = [bundle pathForResource:resourceName ofType:@""];
     }
 
     if (path) {
-        if ([[NSFileManager defaultManager] isExecutableFileAtPath:path]) {
-            return path;
-        } else {
-            IOWarn("File %@ for %@ is not executable", path, prefsName);
+        if (![[NSFileManager defaultManager] isExecutableFileAtPath:path]) {
+            IOWarn("File %@ for %@ is not executable", path, resourceName);
+            return nil;
         }
     }
+    return path;
+}
 
-    IOWarn("Can't find working executable for %@ - disabling",prefsName);
-    NSBeep();
-    [defs setBool:NO forKey:[prefsName stringByAppendingString:@"@Enabled"]];
+-(NSString *)executablePathForKey:(NSString *)prefsName bundleName:(NSString *)resourceName {
+    NSString *path = [self pathForExecutableName:resourceName];
 
-    return nil;
+    if (!path) {
+        IOWarn("Can't find working executable for %@ - disabling",prefsName);
+        NSBeep();
+    }
+    return path;
 }
 
 -(NSURL *)tempPath {
@@ -156,6 +182,12 @@
 
 -(BOOL)runWithTempPath:(NSURL *)tempPath {
     return NO; /*abstract*/
+}
+
+-(NSInteger)timelimitForLevel:(NSInteger)level {
+    const NSInteger timelimit = 10 + [file byteSizeOriginal]/1024;
+    const NSInteger maxTime = 8 + level*13;
+    return MIN(maxTime, timelimit);
 }
 
 @end

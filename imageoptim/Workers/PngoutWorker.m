@@ -12,18 +12,17 @@
 
 @implementation PngoutWorker
 
--(instancetype)init {
-    if (self = [super init]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        level = 3-[defaults integerForKey:@"PngOutLevel"];
+- (instancetype)initWithLevel:(NSInteger)aLevel defaults:(NSUserDefaults *)defaults file:(File *)aFile {
+    if (self = [super initWithFile:aFile]) {
+        level = !aLevel ? 2 : (aLevel >= 4 ? 0 : 1);
         removechunks = [defaults boolForKey:@"PngOutRemoveChunks"];
-        interruptIfTakesTooLong = [defaults boolForKey:@"PngOutInterruptIfTakesTooLong"];
+        timelimit = [self timelimitForLevel:aLevel];
     }
     return self;
 }
 
 -(NSInteger)settingsIdentifier {
-    return level*4 + removechunks*2 + interruptIfTakesTooLong;
+    return level*4 + removechunks*2 + (timelimit < 60 ? 1 : 0);
 }
 
 -(BOOL)runWithTempPath:(NSURL *)temp {
@@ -32,13 +31,13 @@
 
     [args insertObject:@"-r" atIndex:0];
 
-    int actualLevel = (int)level;
+    NSInteger actualLevel = level;
     if ([file isLarge] && level < 2) {
         actualLevel++; // use faster setting for large files
     }
 
     if (actualLevel) { // s0 is default
-        [args insertObject:[NSString stringWithFormat:@"-s%d",actualLevel] atIndex:0];
+        [args insertObject:[NSString stringWithFormat:@"-s%d",(int)actualLevel] atIndex:0];
     }
 
     if (!removechunks) { // -k0 (remove) is default
@@ -64,15 +63,13 @@
     [task setStandardOutput: fileOutputHandle];
     [task setStandardError: commandPipe];
 
-    double timelimit = 10.0 + [file byteSizeOriginal]/1024.0;
-    if (timelimit > 60.0) timelimit = 60.0;
+    [task performSelector:@selector(interrupt) withObject:nil afterDelay:timelimit];
 
-    if (interruptIfTakesTooLong) [task performSelector:@selector(interrupt) withObject:nil afterDelay:timelimit];
     [self launchTask];
 
     [self parseLinesFromHandle:commandHandle];
 
-    if (interruptIfTakesTooLong) [NSObject cancelPreviousPerformRequestsWithTarget:task selector:@selector(interrupt) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:task selector:@selector(interrupt) object:nil];
 
     [task waitUntilExit];
     [commandHandle closeFile];

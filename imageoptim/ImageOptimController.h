@@ -3,21 +3,20 @@
 
 extern NSDictionary *statusImages;
 
-@class FilesQueue;
+@class FilesController;
 @class PrefsController;
 
 @interface ImageOptimController : NSObject <NSApplicationDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate>
 {
 	IBOutlet NSTableView *tableView;
-	IBOutlet FilesQueue *__unsafe_unretained filesController;
+	IBOutlet FilesController *__unsafe_unretained filesController;
 
 	PrefsController *prefsController;
 
-	IBOutlet NSProgressIndicator *progressBar;
     IBOutlet NSTextField *statusBarLabel;
     IBOutlet NSTextView *credits;
 
-    IBOutlet NSTableColumn *sizeColumn, *originalSizeColumn, *savingsColumn, *bestToolColumn;
+    IBOutlet NSTableColumn *fileColumn, *sizeColumn, *originalSizeColumn, *savingsColumn, *bestToolColumn;
 
 	QLPreviewPanel* previewPanel;
 
@@ -26,6 +25,7 @@ extern NSDictionary *statusImages;
 }
 
 - (IBAction)showPrefs:(id)sender;
+- (IBAction)stop:(id)sender;
 - (IBAction)startAgain:(id)sender;
 - (IBAction)startAgainOptimized:(id)sender;
 - (IBAction)clearComplete:(id)sender;
@@ -37,7 +37,7 @@ extern NSDictionary *statusImages;
 -(IBAction)browseForFiles:(id)sender;
 
 @property (readonly) int numberOfCPUs;
--(void)loadCreditsHTML;
+-(void)loadCreditsHTML:(id)_;
 
-@property (unsafe_unretained, readonly) FilesQueue *filesQueue;
+@property (unsafe_unretained, readonly) FilesController *filesController;
 @end

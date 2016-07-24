@@ -1,9 +1,8 @@
+build: all
 
-jpeglib.h:
-	curl http://www.ijg.org/files/jpegsrc.v8.tar.gz | tar xz --strip-components=1
-	-patch -p0 -i remove_unused_features.diff
-	
-clean:
-	
-install:
-	
+all: src/jpeglib.h
+
+src/jpeglib.h: ../.gitmodules
+	../scripts/fetch-submodule src && touch src/jpeglib.h
+
+.PHONY: build all install clean

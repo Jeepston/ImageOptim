@@ -14,14 +14,11 @@
     return maxquality*2 + strip;
 }
 
--(instancetype)initWithFile:(File *)aFile {
+-(instancetype)initWithDefaults:(NSUserDefaults *)defaults file:(File *)aFile {
     if (self = [super initWithFile:aFile]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-
         // Sharing setting with jpegtran
         strip = [defaults boolForKey:@"JpegTranStripAll"];
-
-        maxquality = [defaults integerForKey:@"JpegOptimMaxQuality"];
+        maxquality = [defaults boolForKey:@"LossyEnabled"] ? [defaults integerForKey:@"JpegOptimMaxQuality"] : 100;
     }
     return self;
 }
@@ -38,14 +35,15 @@
         IOWarn("Can't make temp copy of %@ in %@", file.filePathOptimized.path, temp.path);
     }
 
-    NSMutableArray *args = [NSMutableArray arrayWithObjects: @"-q",@"--",temp.path,nil];
+    BOOL lossy = maxquality > 10 && maxquality < 100;
 
+    NSMutableArray *args = [NSMutableArray arrayWithObjects:
+                            strip ? @"--strip-all" : @"--strip-none",
+                            lossy ? @"--all-progressive" : @"--all-normal", // lossless progressive is redundant with jpegtran, but lossy baseline would prevent parallelisation
+                            @"-v", // needed for parsing output size
+                            @"--", temp.path, nil];
 
-    if (strip) {
-        [args insertObject:@"--strip-all" atIndex:0];
-    }
-
-    if (maxquality > 10 && maxquality < 100) {
+    if (lossy) {
         [args insertObject:[NSString stringWithFormat:@"-m%d",(int)maxquality] atIndex:0];
     }
 
@@ -73,7 +71,7 @@
     }
 
     if (![self makesNonOptimizingModifications] || isSignificantlySmaller) {
-        return [file setFilePathOptimized:temp size:fileSizeOptimized toolName:@"JpegOptim"];
+        return [file setFilePathOptimized:temp size:fileSizeOptimized toolName:lossy ? [NSString stringWithFormat: @"JpegOptim %d%%", (int)maxquality] : @"JpegOptim"];
     }
     return NO;
 }

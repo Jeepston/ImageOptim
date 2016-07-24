@@ -4,17 +4,14 @@
 #ifndef GIFSICLE_CONFIG_H
 #define GIFSICLE_CONFIG_H
 
-/* Define when using the debugging malloc library. */
-/* #undef DMALLOC */
-
 /* Define to the number of arguments to gettimeofday (gifview only). */
 /* #undef GETTIMEOFDAY_PROTO */
 
 /* Define if GIF LZW compression is off. */
 /* #undef GIF_UNGIF */
 
-/* Define if intXX_t types are not available. */
-/* #undef HAVE_FAKE_INT_TYPES */
+/* Define to 1 if the system has the type `int64_t'. */
+#define HAVE_INT64_T 1
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
@@ -24,6 +21,9 @@
 
 /* Define to 1 if you have the `mkstemp' function. */
 #define HAVE_MKSTEMP 1
+
+/* Define to 1 if you have the `pow' function. */
+#define HAVE_POW 1
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #define HAVE_STDINT_H 1
@@ -62,28 +62,28 @@
 /* #undef HAVE_U_INT_TYPES */
 
 /* Define to write GIFs to stdout even when stdout is a terminal. */
-/* #undef OUTPUT_GIF_TO_TERMINAL */
+#define OUTPUT_GIF_TO_TERMINAL
 
 /* Name of package */
 #define PACKAGE "gifsicle"
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT ""
+#define PACKAGE_BUGREPORT "pornel@pornel.net"
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME ""
+#define PACKAGE_NAME "gifsicle"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING ""
+#define PACKAGE_STRING "gifsicle 1.88-lossy"
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME ""
+#define PACKAGE_TARNAME "gifsicle"
 
 /* Define to the home page for this package. */
-#define PACKAGE_URL ""
+#define PACKAGE_URL "https://pornel.net/lossygif"
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION ""
+#define PACKAGE_VERSION "1.88"
 
 /* Pathname separator character ('/' on Unix). */
 #define PATHNAME_SEPARATOR '/'
@@ -94,11 +94,17 @@
 /* The size of `unsigned int', as computed by sizeof. */
 #define SIZEOF_UNSIGNED_INT 4
 
+/* The size of `unsigned long', as computed by sizeof. */
+#define SIZEOF_UNSIGNED_LONG 8
+
+/* The size of `void *', as computed by sizeof. */
+#define SIZEOF_VOID_P 8
+
 /* Define to 1 if you have the ANSI C header files. */
 #define STDC_HEADERS 1
 
 /* Version number of package */
-#define VERSION "1.63-imageoptim"
+#define VERSION "1.88"
 
 /* Define if X is not available. */
 #define X_DISPLAY_MISSING 1
@@ -112,24 +118,15 @@
 /* #undef inline */
 #endif
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Use either the clean-failing malloc library in fmalloc.c, or the debugging
-   malloc library in dmalloc.c. */
-#ifdef DMALLOC
-# include "dmalloc.h"
-# define Gif_DeleteFunc		(&debug_free)
-# define Gif_DeleteArrayFunc	(&debug_free)
-#else
-# include <stddef.h>
-# define xmalloc(s)		fail_die_malloc((s),__FILE__,__LINE__)
-# define xrealloc(p,s)		fail_die_realloc((p),(s),__FILE__,__LINE__)
-# define xfree			free
-void *fail_die_malloc(size_t, const char *, int);
-void *fail_die_realloc(void *, size_t, const char *, int);
-#endif
+/* Use the clean-failing malloc library in fmalloc.c. */
+#define GIF_ALLOCATOR_DEFINED   1
+#define Gif_Free free
 
 /* Prototype strerror if we don't have it. */
 #ifndef HAVE_STRERROR
@@ -141,5 +138,17 @@ char *strerror(int errno);
 /* Get rid of a possible inline macro under C++. */
 # define inline inline
 #endif
+
+/* Need _setmode under MS-DOS, to set stdin/stdout to binary mode */
+/* Need _fsetmode under OS/2 for the same reason */
+/* Windows has _isatty and _snprintf, not the normal versions */
+#if defined(_MSDOS) || defined(_WIN32) || defined(__EMX__) || defined(__DJGPP__)
+# include <fcntl.h>
+# include <io.h>
+# define isatty _isatty
+# define snprintf _snprintf
+#endif
+
+#define GIF_NO_UNOPTIMIZE 1
 
 #endif /* GIFSICLE_CONFIG_H */

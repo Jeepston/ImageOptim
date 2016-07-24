@@ -10,11 +10,9 @@
 
 @implementation AdvCompWorker
 
--(instancetype)init {
-    if (self = [super init]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        level = [defaults integerForKey:@"AdvPngLevel"];
-
+-(instancetype)initWithLevel:(NSInteger)aLevel file:(File *)aFile {
+    if (self = [super initWithFile:aFile]) {
+        level = MAX(1, MIN(4, aLevel));
     }
     return self;
 }
@@ -31,9 +29,12 @@
         IOWarn("Can't make temp copy of %@ in %@; %@",file.filePathOptimized.path,temp.path,error);
         return NO;
     }
-
-    if (![self taskForKey:@"AdvPng" bundleName:@"advpng"
-            arguments:@[[NSString stringWithFormat:@"-%d",(int)(level ? level : 4)],@"-z",@"--",temp.path]]) {
+  
+    NSMutableArray* args = [NSMutableArray arrayWithObjects:
+                            [NSString stringWithFormat:@"-%d",(int)(level ? level : 4)],
+                            @"-z", @"--", temp.path, nil];
+  
+    if (![self taskForKey:@"AdvPng" bundleName:@"advpng" arguments:args]) {
         return NO;
     }
 
@@ -46,11 +47,11 @@
     [self launchTask];
 
     [self parseLinesFromHandle:commandHandle];
-    [task waitUntilExit];
+    BOOL ok = [self waitUntilTaskExit];
 
     [commandHandle closeFile];
 
-    if ([task terminationStatus]) return NO;
+    if (!ok) return NO;
 
     return [file setFilePathOptimized:temp  size:fileSizeOptimized toolName:@"AdvPNG"];
 }

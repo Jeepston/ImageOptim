@@ -2,6 +2,8 @@
 VERSION=0.6.5
 OPTIPNG_FILENAME=optipng-$(VERSION).tar.gz
 
+build: all
+
 all: patched
 
 patched: src/optipng.c
@@ -10,6 +12,7 @@ patched: src/optipng.c
 	touch patched
 
 src/optipng.c: /tmp/$(OPTIPNG_FILENAME)
+	-rm -f patched
 	tar xzf /tmp/$(OPTIPNG_FILENAME) --strip-components=1 optipng-$(VERSION)/src optipng-$(VERSION)/lib/pngxtern
 
 /tmp/$(OPTIPNG_FILENAME):
@@ -18,5 +21,6 @@ src/optipng.c: /tmp/$(OPTIPNG_FILENAME)
 clean:
 	- rm -rf ./patched ./src/ ./lib/
 
-install:
-	
+install: all
+
+.PHONY: build all install clean

@@ -17,7 +17,7 @@
 }
 
 -(instancetype)initWithFile:(File *)aFile {
-    if (self = [self init]) {
+    if (self = [super init]) {
         self.file = aFile;
     }
     return self;
@@ -61,7 +61,9 @@
         if (![self isCancelled]) {
             if (![self canSkip]) {
                 [self run];
-                if (![self isCancelled]) [self markResultForSkipping];
+                if (![self isCancelled] && !file.isFailed) {
+                    [self markResultForSkipping];
+                }
             } else {
                 IODebug("Skipping %@, because it already optimized %@", [self className], file.fileName);
             }

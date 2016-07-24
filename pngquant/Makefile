@@ -1,11 +1,8 @@
-PNGQUANT_GIT=git://github.com/pornel/pngquant.git
+build: all
 
-all: src
+all: src/pngquant.c
 
-src:
-	git clone --depth=1 $(PNGQUANT_GIT) ./src
+src/pngquant.c: ../.gitmodules
+	../scripts/fetch-submodule src && touch src/pngquant.c
 
-clean:
-	-rm -rf ./src
-
-install:
+.PHONY: build all install clean

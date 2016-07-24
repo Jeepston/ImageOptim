@@ -1,8 +1,9 @@
-zopfli:
-	git clone https://github.com/pornel/zopfli.git zopfli
+build: all
 
-clean:
-	rm -rf zopfli
+all: zopfli/src
 
-install:
+zopfli/src: ../.gitmodules
+	../scripts/fetch-submodule zopfli && touch zopfli/src
+
+.PHONY: build all install clean
 

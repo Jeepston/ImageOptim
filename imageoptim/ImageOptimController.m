@@ -1,9 +1,11 @@
 #import "ImageOptimController.h"
-#import "FilesQueue.h"
+#import "FilesController.h"
 #import "RevealButtonCell.h"
 #import "File.h"
 #import "Workers/Worker.h"
 #import "PrefsController.h"
+#import "MyTableView.h"
+#import "SharedPrefs.h"
 #include <mach/mach_host.h>
 #include <mach/host_info.h>
 #import <Quartz/Quartz.h>
@@ -12,11 +14,9 @@
 
 extern int quitWhenDone;
 
-NSDictionary *statusImages;
-
 static const char *kIMPreviewPanelContext = "preview";
 
-@synthesize filesQueue=filesController;
+@synthesize filesController;
 
 - (void)applicationWillFinishLaunching:(NSNotification *)unused {
     if (quitWhenDone) {
@@ -25,23 +25,43 @@ static const char *kIMPreviewPanelContext = "preview";
 
     NSMutableDictionary *defs = [NSMutableDictionary dictionaryWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"defaults" ofType:@"plist"]];
 
-    int maxTasks = [self numberOfCPUs];
+    NSUInteger maxTasks = [[NSProcessInfo processInfo] activeProcessorCount];
 
-    defs[@"RunConcurrentTasks"] = @(maxTasks);
+    defs[@"RunConcurrentFiles"] = @(maxTasks);
     defs[@"RunConcurrentDirscans"] = @((int)ceil((double)maxTasks/3.9));
 
     // Use lighter defaults on slower machines
-    if (maxTasks <= 2) {
-        defs[@"PngCrushEnabled"] = @(NO);
-        if (maxTasks <= 4) {
-            defs[@"PngOutEnabled"] = @(NO);
+    if (maxTasks <= 4) {
+        defs[@"PngOutEnabled"] = @(NO);
+        if (maxTasks <= 2) {
+            defs[@"PngCrushEnabled"] = @(NO);
         }
     }
 
-    [[NSUserDefaults standardUserDefaults] registerDefaults:defs];
+    NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+    [userDefaults registerDefaults:defs];
+    
+    [self initStatusbarWithDefaults:userDefaults];
+
+    IOSharedPrefsCopy(userDefaults);
 
     [filesController configureWithTableView:tableView];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(observeNotification:) name:kFilesQueueFinished object:filesController];
+
+    NSArray *monospaceFontColumns = @[
+                                      fileColumn,
+                                      sizeColumn,
+                                      originalSizeColumn,
+                                      savingsColumn,
+                                      bestToolColumn,
+                                      ];
+    for (NSTableColumn *column in monospaceFontColumns) {
+        NSFont *font = [NSFont systemFontOfSize:13];
+        if ([NSFont respondsToSelector:@selector(monospacedDigitSystemFontOfSize:weight:)]) {
+            font = [NSFont monospacedDigitSystemFontOfSize:13 weight:NSFontWeightRegular];
+        }
+        [column.dataCell setFont:font];
+    }
 
     [NSApp setServicesProvider:self];
     NSUpdateDynamicServices();
@@ -54,7 +74,6 @@ static const char *kIMPreviewPanelContext = "preview";
 - (void)handleServices:(NSPasteboard *)pboard
     userData:(NSString *)userData
     error:(NSString **)error {
-    assert(statusImages);
 
     NSArray *paths = [pboard propertyListForType:NSFilenamesPboardType];
     [filesController performSelectorInBackground:@selector(addPaths:) withObject:paths];
@@ -75,8 +94,14 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     return [[formatter stringFromNumber:@(size)] stringByAppendingString:unit];
 };
 
+static void appendFormatNameIfLossyEnabled(NSUserDefaults *defs, NSString *name, NSString *key, NSMutableArray *arr) {
+    NSInteger q = [defs integerForKey:key];
+    if (q > 0 && q < 100) {
+        [arr addObject:[NSString stringWithFormat:@"%@ %ld%%", name, q]];
+    }
+}
 
--(void)initStatusbar {
+-(void)initStatusbarWithDefaults:(NSUserDefaults *)defs {
     [[statusBarLabel cell] setBackgroundStyle:NSBackgroundStyleRaised];
 
     static BOOL overallAvg = NO;
@@ -97,6 +122,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
                            dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0));
     dispatch_source_set_event_handler(statusBarUpdateQueue, ^ {
         NSString *str = defaultText;
+        BOOL selectable = NO;
         @synchronized(filesController) {
             long long bytesTotal=0, optimizedTotal=0;
             double optimizedFractionTotal=0, maxOptimizedFraction=0;
@@ -104,7 +130,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
 
             NSArray *content = [filesController content];
             for (File *f in content) {
-                const long long bytes = f.byteSizeOriginal, optimized = f.byteSizeOptimized;
+                const NSUInteger bytes = f.byteSizeOriginal, optimized = f.byteSizeOptimized;
                 if (bytes && (bytes != optimized || [f isDone])) {
                     const double optimizedFraction = 1.0 - (double)optimized/(double)bytes;
                     if (optimizedFraction > maxOptimizedFraction) {
@@ -117,7 +143,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
                 }
             }
 
-            if (fileCount > 1) {
+            if (fileCount > 1 && bytesTotal) {
                 const double savedTotal = 1.0 - (double)optimizedTotal/(double)bytesTotal;
                 const double savedAvg = optimizedFractionTotal/(double)fileCount;
                 if (savedTotal > 0.001) {
@@ -144,13 +170,28 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
                            formatSize(bytesTotal, formatter),
                            [percFormatter stringFromNumber: @(avgNum)],
                            [percFormatter stringFromNumber: @(maxOptimizedFraction)]];
+                    selectable = YES;
+                }
+            } else {
+                if ([defs boolForKey:@"LossyEnabled"]) {
+                    NSMutableArray *arr = [NSMutableArray new];
+                    appendFormatNameIfLossyEnabled(defs, @"JPEG", @"JpegOptimMaxQuality", arr);
+                    appendFormatNameIfLossyEnabled(defs, @"PNG", @"PngMinQuality", arr);
+                    appendFormatNameIfLossyEnabled(defs, @"GIF", @"GifQuality", arr);
+                    if ([arr count]) {
+                        str = [NSString stringWithFormat:@"%@ (%@)",
+                                                      NSLocalizedString(@"Lossy minification enabled", @"status bar"),
+                                                      [arr componentsJoinedByString:@", "]];
+                    }
                 }
             }
+
+            [filesController updateStoppableState];
         }
 
         dispatch_async(dispatch_get_main_queue(), ^() {
             [statusBarLabel setStringValue:str];
-            [statusBarLabel setSelectable:(str != defaultText)];
+            [statusBarLabel setSelectable:selectable];
         });
         usleep(100000); // 1/10th of a sec to avoid updating statusbar as fast as possible (100% cpu on the statusbar alone is ridiculous)
     });
@@ -159,6 +200,12 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     [filesController addObserver:self forKeyPath:@"arrangedObjects.@count" options:0 context:nil];
     [filesController addObserver:self forKeyPath:@"arrangedObjects.@sum.byteSizeOptimized" options:0 context:nil];
     [filesController addObserver:self forKeyPath:@"selectionIndexes" options:0 context:(void*)kIMPreviewPanelContext];
+
+    dispatch_source_merge_data(statusBarUpdateQueue, 1); // Initial display
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSUserDefaultsDidChangeNotification object:defs queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note){
+        dispatch_source_merge_data(statusBarUpdateQueue, 1);
+    }];
 }
 
 -(void)awakeFromNib {
@@ -173,13 +220,11 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     [credits setString:@""];
 
     // this creates and sets the text for textview
-    [self loadCreditsHTML];
-
-    [self initStatusbar];
+    [self performSelectorInBackground:@selector(loadCreditsHTML:) withObject:nil];
 }
 
 
--(void)loadCreditsHTML {
+-(void)loadCreditsHTML:(id)_unused {
 
     static const char header[] = "<!DOCTYPE html>\
     <meta charset=utf-8>\
@@ -203,6 +248,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
 {
     if (context == kIMPreviewPanelContext) {
         [previewPanel reloadData];
+        [filesController updateStoppableState];
     } else {
         // Defer and coalesce statusbar updates
         dispatch_source_merge_data(statusBarUpdateQueue, 1);
@@ -210,11 +256,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
 }
 
 -(void)observeNotification:(NSNotification *)notif {
-    if (filesController.isBusy) {
-        [progressBar startAnimation:self];
-    } else {
-        [progressBar stopAnimation:self];
-
+    if (!filesController.isBusy) {
         if (quitWhenDone) {
             [NSApp terminate:self];
         } else if ([[NSUserDefaults standardUserDefaults] boolForKey:@"BounceDock"]) {
@@ -223,13 +265,6 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     }
 }
 
--(int)numberOfCPUs {
-    host_basic_info_data_t hostInfo;
-    mach_msg_type_number_t infoCount;
-    infoCount = HOST_BASIC_INFO_COUNT;
-    host_info(mach_host_self(), HOST_BASIC_INFO, (host_info_t)&hostInfo, &infoCount);
-    return MIN(32,MAX(1,(hostInfo.max_cpus)));
-}
 
 // invoked by Dock
 - (void)application:(NSApplication *)sender openFiles:(NSArray *)paths {
@@ -244,6 +279,10 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
 
 -(IBAction)revert:(id)sender {
     [filesController revert];
+}
+
+-(IBAction)stop:(id)sender {
+    [filesController stopSelected];
 }
 
 - (IBAction)startAgain:(id)sender {
@@ -295,7 +334,7 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     [oPanel setAllowedFileTypes:[filesController fileTypes]];
 
     [oPanel beginSheetModalForWindow:[tableView window] completionHandler:^(NSInteger returnCode) {
-        if (returnCode == NSOKButton) {
+        if (returnCode == NSModalResponseOK) {
             NSWindow *myWindow=[tableView window];
             [myWindow setStyleMask:[myWindow styleMask]| NSResizableWindowMask ];
             [filesController setRow:-1];
@@ -366,6 +405,8 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
         return [filesController canClearComplete];
     } else if (action == @selector(revert:)) {
         return [filesController canRevert];
+    } else if (action == @selector(stop:)) {
+        return [filesController isStoppable];
     }
 
     return [menuItem isEnabled];
@@ -388,8 +429,8 @@ static NSString *formatSize(long long byteSize, NSNumberFormatter *formatter) {
     }
 
     // convert icon rect to screen coordinates
-    iconRect = [tableView convertRectToBase:iconRect];
-    iconRect.origin = [[tableView window] convertBaseToScreen:iconRect.origin];
+    iconRect.origin = [tableView convertPoint:iconRect.origin toView:nil];
+    iconRect = [tableView.window convertRectToScreen:iconRect];
 
     return iconRect;
 }

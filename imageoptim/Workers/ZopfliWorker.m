@@ -6,11 +6,11 @@
 
 @synthesize alternativeStrategy;
 
--(instancetype)init {
-    if (self = [super init]) {
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        iterations = (int)[defaults integerForKey:@"ZopfliIterations"];
-        strip = [[NSUserDefaults standardUserDefaults] boolForKey:@"PngOutRemoveChunks"];
+-(instancetype)initWithLevel:(NSInteger)aLevel defaults:(NSUserDefaults *)defaults file:(File *)aFile {
+    if (self = [super initWithFile:aFile]) {
+        iterations = 3 + 3*aLevel;
+        strip = [defaults boolForKey:@"PngOutRemoveChunks"];
+        timelimit = [self timelimitForLevel:aLevel];
     }
     return self;
 }
@@ -27,23 +27,26 @@
         [args insertObject:@"--keepchunks=tEXt,zTXt,iTXt,gAMA,sRGB,iCCP,bKGD,pHYs,sBIT,tIME,oFFs,acTL,fcTL,fdAT,prVW,mkBF,mkTS,mkBS,mkBT" atIndex:0];
     }
 
-    int actualIterations = iterations;
-    unsigned long timelimit = 10 + [file byteSizeOriginal]/1024;
-    if (timelimit > 60) timelimit = 60;
+    NSInteger actualIterations = iterations;
+
+    NSString *filters = @"--filters=0pme";
 
     if ([file isLarge]) {
-        actualIterations /= 2; // use faster setting for large files
+        actualIterations = 5 + actualIterations/3; // use faster setting for large files
+        filters = @"--filters=p";
     }
 
-    if ([file isSmall]) {
-        actualIterations *= 2;
-        [args insertObject:@"--splitting=3" atIndex:0]; // try both splitting strategies
-    } else if (alternativeStrategy) {
-        [args insertObject:@"--splitting=2" atIndex:0]; // by default splitting=1, so make second run use different split
+    if (alternativeStrategy) {
+        timelimit *= 1.4;
+        filters = @"--filters=bp";
+    } else {
+        timelimit *= 0.8;
     }
+
+    [args insertObject:filters atIndex:0];
 
     if (actualIterations) {
-        [args insertObject:[NSString stringWithFormat:@"--iterations=%d", actualIterations] atIndex:0];
+        [args insertObject:[NSString stringWithFormat:@"--iterations=%d", (int)actualIterations] atIndex:0];
     }
 
     [args insertObject:[NSString stringWithFormat:@"--timelimit=%lu", timelimit] atIndex:0];
@@ -61,11 +64,11 @@
     [self launchTask];
 
     [commandHandle readInBackgroundAndNotify];
-    [task waitUntilExit];
+    BOOL ok = [self waitUntilTaskExit];
 
     [commandHandle closeFile];
 
-    if ([task terminationStatus]) return NO;
+    if (!ok) return NO;
 
     NSInteger fileSizeOptimized = [File fileByteSize:temp];
     if (fileSizeOptimized > 70) {

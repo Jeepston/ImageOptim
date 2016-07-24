@@ -1,54 +1,16 @@
-//
-//  FilesQueue.h
-//
-//  Created by porneL on 23.wrz.07.
-//
 
-#import <Cocoa/Cocoa.h>
-#import <Quartz/Quartz.h>
+#import <Foundation/Foundation.h>
 
-@class File, ResultsDb;
-extern NSString *const kFilesQueueFinished;
+@class File, DirWorker;
 
-@interface FilesQueue : NSArrayController <NSTableViewDelegate,NSTableViewDataSource> {
-	NSTableView *tableView;
-	BOOL isEnabled, isBusy;
-	NSInteger nextInsertRow;
-	NSOperationQueue *cpuQueue;
-    NSOperationQueue *fileIOQueue;
-	NSOperationQueue *dirWorkerQueue;
-	
-    NSHashTable *seenPathHashes;
-    ResultsDb *db;
-    
-    NSLock *queueWaitingLock;
-}
+@interface FilesQueue : NSObject
 
--(void)configureWithTableView:(NSTableView*)a;
-
-- (NSString *)tableView:(NSTableView *)aTableView toolTipForCell:(NSCell *)aCell rect:(NSRectPointer)rect tableColumn:(NSTableColumn *)aTableColumn row:(int)row mouseLocation:(NSPoint)mouseLocation;
--(void)addURLsBelowSelection:(NSArray *)paths;
--(BOOL)addURLs:(NSArray *)paths;
--(BOOL)addPaths:(NSArray *)paths;
--(BOOL)addURLs:(NSArray *)paths filesOnly:(BOOL)t;
-
--(void) moveObjectsInArrangedObjectsFromIndexes:(NSIndexSet*)indexSet
-										toIndex:(NSUInteger)insertIndex;
-- (NSUInteger)rowsAboveRow:(NSUInteger)row inIndexSet:(NSIndexSet *)indexSet;
-- (NSUInteger)numberOfRowsInTableView:(NSTableView *)tableview;
-
--(void)startAgainOptimized:(BOOL)optimized;
--(BOOL)canStartAgainOptimized:(BOOL)optimized;
--(void)clearComplete;
-@property (readonly) BOOL canClearComplete;
--(void)revert;
-@property (readonly) BOOL canRevert;
+-(void)addFile:(nonnull File*)f;
+-(void)addDirWorker:(nonnull DirWorker*)d;
+-(void)wait;
 -(void)cleanup;
--(void)setRow:(NSInteger)row;
+-(nonnull NSNumber *)queueCount;
+@property (assign, atomic) BOOL isBusy;
 
-@property (readonly, copy) NSArray *fileTypes;
-
-@property (unsafe_unretained, readonly, nonatomic) NSNumber *queueCount;
-@property (readonly) BOOL isBusy;
-
+- (nullable instancetype)initWithCPUs:(NSInteger)cpus dirs:(NSInteger)dirs files:(NSInteger)fileops defaults:(nonnull NSUserDefaults*)defaults;
 @end
